@@ -19,12 +19,10 @@ const int ledPin = 23;
 const int DIO = 21;
 const int CLK = 22;
 
-// Timer state
 bool timerRunning = false;
 unsigned long timerEndMillis = 0;
 int countdownSeconds = 0;
 
-// Timing control
 unsigned long lastTelegramPoll = 0;
 const unsigned long telegramInterval = 3000;
 
@@ -63,8 +61,8 @@ void setup() {
   lastReconnectAttempt = millis();
   display.setBrightness(7);
 
-  lastUpdateID = -1;  // Reset update tracking
-  checkTelegram();    // Skip old messages
+  lastUpdateID = -1;
+  checkTelegram();  // Skip old messages
 }
 
 void updateTimerDisplay() {
@@ -75,18 +73,55 @@ void updateTimerDisplay() {
     int remaining = (timerEndMillis - currentMillis) / 1000;
 
     if (remaining <= 0) {
-      display.showNumberDec(0, true);
+      display.showNumberDecEx(0, 0b01000000, true);  // Show 00:00 with colon
       timerRunning = false;
       Serial.println("Timer done!");
       digitalWrite(ledPin, LOW);
     } else {
-      int minutes = remaining / 60;
+      int hours = remaining / 3600;
+      int minutes = (remaining % 3600) / 60;
       int seconds = remaining % 60;
-      int toDisplay = minutes * 100 + seconds;
-      display.showNumberDec(toDisplay, true);
+
+      if (hours > 0) {
+        // Format H:MM (e.g., 1:45 as 145)
+        int toDisplay = hours * 100 + minutes;
+        display.showNumberDecEx(toDisplay, 0b01000000, true);  // colon ON
+      } else {
+        // Format MM:SS (e.g., 03:21 as 321)
+        int toDisplay = minutes * 100 + seconds;
+        display.showNumberDecEx(toDisplay, 0b01000000, true);  // colon ON
+      }
     }
   }
 }
+
+
+int parseShorthandTime(String input) {
+  input.toLowerCase();
+  int hours = 0, minutes = 0, seconds = 0;
+  String num = "";
+
+  for (int i = 0; i < input.length(); i++) {
+    char c = input[i];
+
+    if (isDigit(c)) {
+      num += c;  // Build the number
+    } else if (c == 'h' || c == 'm' || c == 's') {
+      int val = num.toInt();  // Convert built-up number string
+      num = "";               // Reset the number string
+
+      if (c == 'h') hours = val;
+      else if (c == 'm') minutes = val;
+      else if (c == 's') seconds = val;
+    } else {
+      num = ""; // Reset on any other char (like space or typo)
+    }
+  }
+
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+
 
 void checkTelegram() {
   WiFiClientSecure client;
@@ -102,9 +137,7 @@ void checkTelegram() {
     url += "?offset=" + String(lastUpdateID + 1);
   }
 
-  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
-               "Host: api.telegram.org\r\n" +
-               "Connection: close\r\n\r\n");
+  client.print(String("GET ") + url + " HTTP/1.1\r\n" + "Host: api.telegram.org\r\n" + "Connection: close\r\n\r\n");
 
   while (client.connected()) {
     updateTimerDisplay();
@@ -150,30 +183,38 @@ void checkTelegram() {
         digitalWrite(ledPin, LOW);
         Serial.println("LED OFF");
 
+      } else if (message == "/cancel") {
+        if (timerRunning) {
+          timerRunning = false;
+          display.showNumberDecEx(0, 0b01000000, true);  // Show 00:00
+          digitalWrite(ledPin, LOW);
+          Serial.println("Timer cancelled.");
+        } else {
+          Serial.println("No active timer to cancel.");
+        }
       } else if (message.startsWith("/timer")) {
-        Serial.println("Parsing timer...");
+        Serial.println("Parsing shorthand timer...");
 
-        int min = 0, sec = 0;
-        int minIndex = message.indexOf("minute");
-        if (minIndex != -1) {
-          int space = message.lastIndexOf(' ', minIndex - 2);
-          min = message.substring(space + 1, minIndex).toInt();
-        }
-
-        int secIndex = message.indexOf("second");
-        if (secIndex != -1) {
-          int space = message.lastIndexOf(' ', secIndex - 2);
-          sec = message.substring(space + 1, secIndex).toInt();
-        }
-
-        countdownSeconds = min * 60 + sec;
+        countdownSeconds = parseShorthandTime(message);
         if (countdownSeconds > 0) {
+          if (timerRunning) {
+            Serial.println("Cancelling previous timer...");
+            timerRunning = false;
+            display.showNumberDecEx(0, 0b01000000, true);  // Clear display with colon
+            digitalWrite(ledPin, LOW);
+          }
+
           timerEndMillis = millis() + (countdownSeconds * 1000);
           timerRunning = true;
-          Serial.printf("Starting timer for %d min %d sec\n", min, sec);
+
+          int hrs = countdownSeconds / 3600;
+          int mins = (countdownSeconds % 3600) / 60;
+          int secs = countdownSeconds % 60;
+
+          Serial.printf("Starting timer for %d hr %d min %d sec\n", hrs, mins, secs);
           digitalWrite(ledPin, HIGH);
         } else {
-          Serial.println("Could not parse timer.");
+          Serial.println("Could not parse shorthand time.");
         }
       }
     }
@@ -181,7 +222,6 @@ void checkTelegram() {
 }
 
 void loop() {
-  // Reconnect Wi-Fi if needed
   if (millis() - lastReconnectAttempt >= reconnectInterval || WiFi.status() != WL_CONNECTED) {
     Serial.println("Reconnecting to Wi-Fi...");
     WiFi.disconnect(true);
@@ -200,11 +240,9 @@ void loop() {
     lastReconnectAttempt = millis();
   }
 
-  // Update timer display
   updateTimerDisplay();
 
-  // Poll Telegram every 3 seconds
-  if (!timerRunning && millis() - lastTelegramPoll >= telegramInterval) {
+  if (millis() - lastTelegramPoll >= telegramInterval) {
     lastTelegramPoll = millis();
     checkTelegram();
   }
