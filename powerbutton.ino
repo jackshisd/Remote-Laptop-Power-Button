@@ -6,13 +6,13 @@
 
 // Eduroam WPA2-Enterprise credentials
 #define EAP_ANONYMOUS_IDENTITY "anon@ucla.edu"
-#define EAP_IDENTITY "jackmshi@ucla.edu"
-#define EAP_PASSWORD "6217689aB!bruin"
+#define EAP_IDENTITY "your_email"
+#define EAP_PASSWORD "your_password"
 const char* ssid = "eduroam";
 
 // Telegram Bot credentials
-const char* botToken = "7554571420:AAGJIfcGbK4DER0tSNLh65zR9trlYKXiiW8";
-const int64_t chatID = 6069061615;
+const char* botToken = "your token";
+const int64_t chatID = 123; //your chat id
 
 // Pins
 const int ledPin = 23;
